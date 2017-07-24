@@ -1,0 +1,121 @@
+#!/usr/bin/env python2
+# coding: utf-8
+"""
+The MIT License
+
+Further resources on the MIT License
+Copyright 2017 İlter Engin KIZILGÜN
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
+
+
+import argparse
+import zmq
+import os
+import sys
+import time
+
+VERBOSE = False
+
+socket_types = {
+	'pub': 	zmq.PUB,
+	'sub': 	zmq.SUB,
+	'req': 	zmq.REQ,
+	'rep': 	zmq.REP,
+	'push': zmq.PUSH,
+	'pull': zmq.PULL,
+	'pair': zmq.PAIR
+}
+
+def error_and_exit(error_message):
+	sys.stderr.write(error_message)
+	sys.stderr.write("\n")
+	sys.stderr.flush()
+	sys.exit(-1)
+
+def create_socket(socket_type, connection_type, addresses, subscribe_topic):
+	ctx = zmq.Context()
+	socket = ctx.socket(socket_types[socket_type])
+	for address in addresses:
+		if connection_type == 'bind':
+			socket.bind(address)
+		else: # connect ...
+			socket.connect(address)
+	# add topic for sub socket
+	if socket_type == 'sub':
+		socket.subscribe(subscribe_topic)
+
+	return ctx, socket
+
+
+def dispose_socket_and_context(ctx, socket):
+	socket.close()
+	ctx.term()
+
+
+def verbose_output(msg):
+	if not VERBOSE:
+		return
+	sys.stdout.write(msg)
+	sys.stdout.write("\n")
+	sys.stdout.flush()
+
+
+if __name__ == '__main__':
+	parser = argparse.ArgumentParser(description="ZCAT ** LITTLE ZEROMQ TEST SUITE **")
+	parser.add_argument('-t', '--socket-type', help='pub/sub/req/rep/push/pull/pair',
+		choices=('sub','pub', 'req','rep', 'push', 'pull', 'pair'), required=True)
+	parser.add_argument('-c', '--connection-type', help='connect or bind', choices=('bind', 'connect'),
+		required=True)
+	parser.add_argument('-l', '--listen', help='test for listen', action='store_true')
+	parser.add_argument('-v', '--verbose', help='verbose output', action='store_true')
+	parser.add_argument('-s', '--send', help='test for send data', action='store_true')
+	parser.add_argument('-n', '--n', help='N times for loop', default=1, type=int)
+	parser.add_argument('-st', '--subscribe-topic', help='Topic for subscibe', default='')
+	parser.add_argument('-m', '--message', help='Send data with this message', default='Hello World')
+	parser.add_argument('-d', '--delay', help='delay as seconds between send or receive [0.5, 1, 2.3]', default=0.01, type=float)
+	parser.add_argument('-a', '--address', nargs='+', default=[], help='bind or connect address [tcp,inproc,...]',
+		required=True)
+	args = parser.parse_args()
+	# print args
+
+	if args.send == args.listen:
+		error_and_exit("You must to run this program for listen (-l) or send (-s) something")
+
+	VERBOSE = args.verbose
+	ctx, socket = create_socket(args.socket_type, args.connection_type, args.address, args.subscribe_topic)
+
+	# added delay for better result on pub, sub like sockets
+	time.sleep(0.2)
+	start_time = time.time()
+	while args.n > 0:
+		if args.socket_type == 'req':
+			socket.send(args.message)
+			data = socket.recv(0)
+			verbose_output("Received data: %s" % data)
+		elif args.socket_type == 'rep':
+			data = socket.recv(0)
+			verbose_output("Received data: %s" % data)
+			socket.send(args.message)
+		else:
+			if args.send:
+				message = "%s %s" % (args.subscribe_topic, args.message) if args.socket_type == 'pub' else args.message
+				socket.send(message, 0)
+				verbose_output("You probably sent: %s" % message)
+			else:
+				data = socket.recv(0)
+				verbose_output("Received data: %s" % data)
+		time.sleep(args.delay)
+		args.n -= 1
+
+	delta_time = time.time() - start_time
+	print "Test takes", delta_time, "seconds"
+	time.sleep(1)
+
+
+	dispose_socket_and_context(ctx, socket)
